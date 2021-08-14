@@ -11,6 +11,9 @@
 #include "ms-efsrpc_h.h"
 
 #pragma comment(lib, "userenv.lib")
+#pragma comment(lib, "rpcrt4.lib")
+#pragma comment(lib, "winspool.lib")
+#pragma comment (lib,"Advapi32.lib")
 #pragma warning( disable : 28251 )
 
 const RPC_WSTR MS_EFSR_UUID = (RPC_WSTR)L"c681d488-d850-11d0-8c52-00c04fd90f7e";
